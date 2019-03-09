@@ -1,6 +1,7 @@
 const grayMatter = require(`gray-matter`)
 const crypto = require(`crypto`)
 const _ = require(`lodash`)
+const yaml = require(`js-yaml`)
 
 module.exports = async function onCreateNode(
   { node, loadNodeContent, actions, createNodeId, reporter },
@@ -30,36 +31,57 @@ module.exports = async function onCreateNode(
       })
     }
 
-    let markdownNode = {
-      id: createNodeId(`${node.id} >>> MarkdownRemark`),
-      children: [],
-      parent: node.id,
-      internal: {
-        content: data.content,
-        type: `MarkdownRemark`,
-      },
+    const createMarkdownNode = data => {
+      let markdownNode = {
+        id: createNodeId(
+          `${data.key ? node.id + data.key : node.id} >>> MarkdownRemark`
+        ),
+        children: [],
+        parent: node.id,
+        internal: {
+          content: data.content,
+          type: `MarkdownRemark`,
+        },
+      }
+
+      markdownNode.frontmatter = {
+        title: ``, // always include a title
+        ...data.data,
+      }
+
+      markdownNode.excerpt = data.excerpt
+      markdownNode.rawMarkdownBody = data.content
+
+      // Add path to the markdown file path
+      if (node.internal.type === `File`) {
+        markdownNode.fileAbsolutePath = node.absolutePath
+      }
+
+      markdownNode.internal.contentDigest = crypto
+        .createHash(`md5`)
+        .update(JSON.stringify(markdownNode))
+        .digest(`hex`)
+
+      createNode(markdownNode)
+      createParentChildLink({ parent: node, child: markdownNode })
+
+      return markdownNode
     }
 
-    markdownNode.frontmatter = {
-      title: ``, // always include a title
-      ...data.data,
+    const markdownNode = createMarkdownNode(data)
+
+    if (data.sections && Object.keys(data.sections).length) {
+      data.sections.map(section => {
+        if (section.data) {
+          section.data = yaml.safeLoad(section.data)
+        }
+        return section
+      })
+
+      data.sections.forEach(section => {
+        createMarkdownNode(section)
+      })
     }
-
-    markdownNode.excerpt = data.excerpt
-    markdownNode.rawMarkdownBody = data.content
-
-    // Add path to the markdown file path
-    if (node.internal.type === `File`) {
-      markdownNode.fileAbsolutePath = node.absolutePath
-    }
-
-    markdownNode.internal.contentDigest = crypto
-      .createHash(`md5`)
-      .update(JSON.stringify(markdownNode))
-      .digest(`hex`)
-
-    createNode(markdownNode)
-    createParentChildLink({ parent: node, child: markdownNode })
 
     return markdownNode
   } catch (err) {
